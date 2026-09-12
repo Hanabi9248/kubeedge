@@ -1,0 +1,61 @@
+name: Validate optional environment references
+on:
+  push:
+    branches: [codex/validate-optional-env]
+permissions:
+  contents: read
+env:
+  CONTAINER_RUN_OPTIONS: " "
+  GINKGO_VERSION: v2.21.0
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 35036e4e3afa7dd6dc780c23039bf10ea05f099f
+          fetch-depth: 0
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.12'
+      - name: Verify exact source tree
+        run: test "$(git rev-parse HEAD^{tree})" = 77de1c6408c4d8b0c94f4654ba53f1cc9d54d78e
+      - run: sudo apt-get update && sudo apt-get install -y jq
+      - run: make verify
+      - run: make lint
+  tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 35036e4e3afa7dd6dc780c23039bf10ea05f099f
+          fetch-depth: 0
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.12'
+      - name: Verify exact source tree
+        run: test "$(git rev-parse HEAD^{tree})" = 77de1c6408c4d8b0c94f4654ba53f1cc9d54d78e
+      - name: Reproduce original regression
+        shell: bash
+        run: |
+          file=cloud/pkg/controllermanager/edgeapplication/overridemanager/envoverrider.go
+          git show 62940139aacb211a98c3b55cf7229848812a0755:"$file" > "$file"
+          set +e
+          go test ./cloud/pkg/controllermanager/edgeapplication/overridemanager -run TestEnvOverridePreservesOptionalReferences -count=1 > /tmp/optional-before.txt 2>&1
+          result=$?
+          set -e
+          cat /tmp/optional-before.txt
+          git restore -- "$file"
+          test "$result" -ne 0
+          grep -q 'FAIL: TestEnvOverridePreservesOptionalReferences/configMapKeyRef/true' /tmp/optional-before.txt
+          grep -q 'FAIL: TestEnvOverridePreservesOptionalReferences/secretKeyRef/true' /tmp/optional-before.txt
+      - name: Affected package with race detector
+        run: go test -race ./cloud/pkg/controllermanager/edgeapplication/overridemanager -count=1
+      - run: go vet ./cloud/pkg/controllermanager/edgeapplication/overridemanager
+      - run: go install github.com/onsi/ginkgo/v2/ginkgo@${{ env.GINKGO_VERSION }}
+      - run: make test PROFILE=y
+      - name: Enable containerd CRI
+        run: containerd config default | sudo tee /etc/containerd/config.toml && sudo systemctl restart containerd.service
+      - run: make integrationtest
