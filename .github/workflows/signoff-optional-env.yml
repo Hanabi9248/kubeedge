@@ -1,0 +1,49 @@
+name: Sign off environment reference fixes
+on:
+  push:
+    branches: [codex/signoff-optional-env]
+    paths: [.github/workflows/signoff-optional-env.yml]
+permissions:
+  contents: read
+jobs:
+  signoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+      - name: Add sign-offs without changing either source tree
+        env:
+          GIT_AUTHOR_NAME: Hanabi
+          GIT_AUTHOR_EMAIL: 317387557+Hanabi9248@users.noreply.github.com
+          GIT_COMMITTER_NAME: Hanabi
+          GIT_COMMITTER_EMAIL: 317387557+Hanabi9248@users.noreply.github.com
+        run: |
+          set -eu
+          test "$GITHUB_REPOSITORY" = Hanabi9248/kubeedge
+          branch=codex/preserve-optional-env-references
+          first=35036e4e3afa7dd6dc780c23039bf10ea05f099f
+          expected=675ac583dc77a24db4b9af78d9a0c43bd535aafa
+          base=62940139aacb211a98c3b55cf7229848812a0755
+          git fetch origin "$branch"
+          test "$(git rev-parse FETCH_HEAD)" = "$expected"
+          test "$(git rev-parse $expected^)" = "$first"
+          test "$(git rev-parse $first^)" = "$base"
+          test "$(git rev-parse $first^{tree})" = 77de1c6408c4d8b0c94f4654ba53f1cc9d54d78e
+          test "$(git rev-parse $expected^{tree})" = 27e4ea2475413e2535eaaf6d9a40d2f51013b4da
+          parent=$base
+          for old in "$first" "$expected"; do
+            test "$(git show -s --format=%an $old)" = "$GIT_AUTHOR_NAME"
+            test "$(git show -s --format=%ae $old)" = "$GIT_AUTHOR_EMAIL"
+            git show -s --format=%B "$old" > /tmp/message.txt
+            printf '\nSigned-off-by: Hanabi <317387557+Hanabi9248@users.noreply.github.com>\n' >> /tmp/message.txt
+            GIT_AUTHOR_DATE=$(git show -s --format=%aI "$old")
+            export GIT_AUTHOR_DATE
+            signed=$(git commit-tree "$(git rev-parse $old^{tree})" -p "$parent" -F /tmp/message.txt)
+            git diff --exit-code "$old" "$signed"
+            parent=$signed
+          done
+          git push --force-with-lease="refs/heads/$branch:$expected" origin "$parent:refs/heads/$branch"
